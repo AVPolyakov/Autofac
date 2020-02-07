@@ -24,8 +24,54 @@ namespace Autofac.Specification.Test
 
     public class Interceptor : IInterceptor
     {
+        private readonly Action _action;
+
+        public Interceptor(Action action)
+        {
+            _action = action;
+        }
+
         public void Intercept(IInvocation invocation)
         {
+            _action();
+            invocation.Proceed();
+        }
+    }
+
+    public static class RegistrationExtensions2
+    {
+        private static readonly ProxyGenerator ProxyGenerator = new ProxyGenerator();
+
+        public static IRegistrationBuilder<TLimit, TActivatorData, TSingleRegistrationStyle> AddInterceptor
+            <TLimit, TActivatorData, TSingleRegistrationStyle, TInterceptor>(
+                this IRegistrationBuilder<TLimit, TActivatorData, TSingleRegistrationStyle> registration,
+                TInterceptor interceptorPrototype)
+            where TInterceptor : IInterceptor
+        {
+            registration.RegistrationData.ActivatingHandlers.Add((sender, e) =>
+            {
+                var proxiedInterfaces = e.Instance
+                    .GetType()
+                    .GetInterfaces()
+                    .Where(ProxyUtil.IsAccessible)
+                    .ToArray();
+
+                if (!proxiedInterfaces.Any())
+                    return;
+
+                if (proxiedInterfaces.Contains(typeof(IProxyTargetAccessor)))
+                    return;
+
+                var theInterface = proxiedInterfaces.First();
+                var interfaces = proxiedInterfaces.Skip(1).ToArray();
+
+                var interceptor = e.Context.Resolve<TInterceptor>();
+
+                e.Instance = ProxyGenerator.CreateInterfaceProxyWithTarget(
+                    theInterface, interfaces, e.Instance, interceptor);
+            });
+
+            return registration;
         }
     }
 
@@ -38,11 +84,31 @@ namespace Autofac.Specification.Test
             builder.RegisterType<A>().As<IA>()
                 .EnableInterfaceInterceptors()
                 .InterceptedBy(typeof(Interceptor));
-            builder.Register(c => new Interceptor());
+            builder.Register(c => new Interceptor(() => { }));
 
             var container = builder.Build();
             var resolve = container.Resolve<IA>();
             resolve.M1();
+        }
+
+        [Fact]
+        public void InterceptorWorkaround()
+        {
+            var builder = new ContainerBuilder();
+            builder.RegisterAssemblyTypes(typeof(A).Assembly)
+                .Where(type => type == typeof(A))
+                .AsImplementedInterfaces()
+                .AddInterceptor(default(Interceptor));
+            string s = null;
+            builder.Register(c => new Interceptor(() =>
+            {
+                s = "test";
+            }));
+
+            var container = builder.Build();
+            var resolve = container.Resolve<IA>();
+            resolve.M1();
+            Assert.Equal("test", s);
         }
 
         [Fact]
