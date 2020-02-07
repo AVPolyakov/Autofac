@@ -1,13 +1,50 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using Autofac.Builder;
 using Autofac.Core;
+using Autofac.Extras.DynamicProxy;
+using Castle.DynamicProxy;
 using Xunit;
 
 namespace Autofac.Specification.Test
 {
+    public interface IA
+    {
+        void M1();
+    }
+
+    public class A: IA
+    {
+        public void M1()
+        {
+        }
+    }
+
+    public class Interceptor : IInterceptor
+    {
+        public void Intercept(IInvocation invocation)
+        {
+        }
+    }
+
     public class ContainerBuilderTests
     {
+        [Fact]
+        public void Interceptor()
+        {
+            var builder = new ContainerBuilder();
+            builder.RegisterType<A>().As<IA>()
+                .EnableInterfaceInterceptors()
+                .InterceptedBy(typeof(Interceptor));
+            builder.Register(c => new Interceptor());
+
+            var container = builder.Build();
+            var resolve = container.Resolve<IA>();
+            resolve.M1();
+        }
+
         [Fact]
         public void BuildCallbacksInvokedWhenContainerBuilt()
         {
